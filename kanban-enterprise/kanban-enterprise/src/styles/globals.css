@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: #080c14;
+    color: #e2e8f0;
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    overflow-x: hidden;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgba(255,255,255,0.02);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.2);
+  }
+
+  input, textarea, select {
+    outline: none;
+  }
+}
+
+@layer components {
+  .glass {
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .glass-hover {
+    transition: all 0.2s ease;
+  }
+  .glass-hover:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .glass-accent {
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 cursor-pointer;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 cursor-pointer;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.07);
+    color: #94a3b8;
+  }
+  .btn-ghost:hover {
+    background: rgba(255,255,255,0.08);
+    color: #e2e8f0;
+  }
+
+  .btn-danger {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 cursor-pointer;
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: #f87171;
+  }
+  .btn-danger:hover {
+    background: rgba(239,68,68,0.2);
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 rounded-lg text-sm text-slate-200 placeholder-slate-500 transition-all duration-200;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .input-field:focus {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(59,130,246,0.5);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+  }
+
+  .label {
+    @apply block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+  }
+
+  .card {
+    @apply rounded-xl p-4;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .section-title {
+    @apply text-base font-semibold text-slate-200 mb-4;
+    font-family: 'Syne', sans-serif;
+  }
+
+  .menu-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 cursor-pointer;
+    color: #94a3b8;
+  }
+  .menu-item:hover {
+    background: rgba(255,255,255,0.06);
+    color: #e2e8f0;
+  }
+  .menu-item.active {
+    background: rgba(59,130,246,0.12);
+    border: 1px solid rgba(59,130,246,0.2);
+    color: #60a5fa;
+  }
+}
+
+/* Kanban drag animations */
+.task-card-dragging {
+  opacity: 0.5;
+  transform: scale(1.02);
+  cursor: grabbing !important;
+}
+
+.column-drop-active {
+  border-color: rgba(59,130,246,0.4) !important;
+  background: rgba(59,130,246,0.06) !important;
+}
+
+/* Loading shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.03) 25%,
+    rgba(255,255,255,0.07) 50%,
+    rgba(255,255,255,0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Glow effects */
+.glow-blue {
+  box-shadow: 0 0 20px rgba(59,130,246,0.3);
+}
+
+.text-glow {
+  text-shadow: 0 0 20px rgba(59,130,246,0.5);
+}
+
+/* Status indicator pulse */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.95); }
+}
+
+.status-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+/* SLA countdown */
+@keyframes sla-warning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+.sla-warning-blink {
+  animation: sla-warning 1.5s ease-in-out infinite;
+}
