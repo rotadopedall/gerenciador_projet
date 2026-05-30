@@ -18,26 +18,43 @@ export const useTeamsStore = create((set, get) => ({
       .eq('is_active', true)
       .order('name')
 
-    if (!error) set({ teams: data || [] })
+    if (!error && data) set({ teams: data })
+    else if (error) {
+      // Fallback: fetch without joins
+      const { data: simple } = await supabase
+        .from('teams').select('*').eq('is_active', true).order('name')
+      if (simple) set({ teams: simple })
+    }
     set({ loading: false })
   },
 
   fetchMembers: async () => {
+    // Simple fetch first - no joins
     const { data, error } = await supabase
       .from('profiles')
-      .select('*, teams(id, name, color)')
+      .select('*')
       .eq('is_active', true)
       .order('full_name')
 
-    if (!error) set({ members: data || [] })
+    if (!error && data) {
+      // Enrich with team data separately
+      const { data: teams } = await supabase.from('teams').select('id, name, color')
+      const teamsMap = {}
+      if (teams) teams.forEach(t => { teamsMap[t.id] = t })
+
+      const enriched = data.map(m => ({
+        ...m,
+        teams: m.team_id ? teamsMap[m.team_id] : null
+      }))
+      set({ members: enriched })
+    } else {
+      console.error('fetchMembers error:', error)
+    }
   },
 
   createTeam: async (teamData) => {
     const { data, error } = await supabase
-      .from('teams')
-      .insert([teamData])
-      .select()
-      .single()
+      .from('teams').insert([teamData]).select().single()
     if (error) throw error
     await get().fetchTeams()
     return data
@@ -45,11 +62,7 @@ export const useTeamsStore = create((set, get) => ({
 
   updateTeam: async (id, updates) => {
     const { data, error } = await supabase
-      .from('teams')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single()
+      .from('teams').update(updates).eq('id', id).select().single()
     if (error) throw error
     await get().fetchTeams()
     return data
@@ -57,18 +70,14 @@ export const useTeamsStore = create((set, get) => ({
 
   deleteTeam: async (id) => {
     const { error } = await supabase
-      .from('teams')
-      .update({ is_active: false })
-      .eq('id', id)
+      .from('teams').update({ is_active: false }).eq('id', id)
     if (error) throw error
     await get().fetchTeams()
   },
 
   assignMemberToTeam: async (userId, teamId) => {
     const { error } = await supabase
-      .from('profiles')
-      .update({ team_id: teamId })
-      .eq('id', userId)
+      .from('profiles').update({ team_id: teamId }).eq('id', userId)
     if (error) throw error
     await get().fetchMembers()
   },
