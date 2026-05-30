@@ -11,6 +11,7 @@ import toast from 'react-hot-toast'
 const TEAM_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#ec4899','#06b6d4','#f97316']
 
 function TeamForm({ team, onSave, onClose }) {
+  const [saving, setSaving] = useState(false)
   const { members } = useTeamsStore()
   const { register, handleSubmit, control, watch } = useForm({
     defaultValues: team ? {
@@ -30,7 +31,7 @@ function TeamForm({ team, onSave, onClose }) {
   ]
 
   return (
-    <form onSubmit={handleSubmit(onSave)} className="p-5 space-y-4">
+    <form onSubmit={handleSubmit(async (data) => { setSaving(true); try { await onSave(data) } finally { setSaving(false) } })} className="p-5 space-y-4">
       <div>
         <label className="label">Nome da Equipe *</label>
         <input {...register('name', { required: true })} className="input-field" placeholder="Ex: NOC - Nível 1" />
@@ -98,7 +99,7 @@ function TeamForm({ team, onSave, onClose }) {
       </div>
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={onClose} className="btn-ghost">Cancelar</button>
-        <button type="submit" className="btn-primary">Salvar Equipe</button>
+        <button type="submit" disabled={saving} className="btn-primary">{saving ? 'Salvando...' : 'Salvar Equipe'}</button>
       </div>
     </form>
   )

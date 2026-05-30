@@ -6,6 +6,7 @@ import { useTeamsStore } from '../store/teamsStore'
 import { useAuthStore } from '../store/authStore'
 import { ROLES } from '../lib/constants'
 import { supabase } from '../lib/supabase'
+import { createUserWithoutSessionChange } from '../lib/createUser'
 import Modal from '../components/shared/Modal'
 import Select from '../components/shared/Select'
 import toast from 'react-hot-toast'
@@ -29,8 +30,11 @@ function UserForm({ user, onSave, onClose }) {
 
   const handleSave = async (data) => {
     setSaving(true)
-    await onSave(data)
-    setSaving(false)
+    try {
+      await onSave(data)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -64,7 +68,7 @@ function UserForm({ user, onSave, onClose }) {
         </div>
       </div>
       <div className="flex justify-end gap-2 pt-2">
-        <button type="button" onClick={onClose} className="btn-ghost">Cancelar</button>
+        <button type="button" onClick={onClose} disabled={saving} className="btn-ghost">Cancelar</button>
         <button type="submit" disabled={saving} className="btn-primary">
           {saving && (
             <motion.div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full"
@@ -85,9 +89,7 @@ export default function UsersPage() {
   const { members, fetchMembers, teams, fetchTeams } = useTeamsStore()
   const { can } = useAuthStore()
 
-  useEffect(() => {
-    loadData()
-  }, [])
+  useEffect(() => { loadData() }, [])
 
   const loadData = async () => {
     setLoading(true)
@@ -106,77 +108,50 @@ export default function UsersPage() {
   }
 
   const handleSave = async (data) => {
-    try {
-      if (editUser) {
-        // Update profile only
-        const { error } = await supabase.from('profiles').update({
-          full_name: data.full_name,
-          role: data.role,
-          team_id: data.team_id || null,
-        }).eq('id', editUser.id)
-        if (error) throw error
-        toast.success('Usuário atualizado!')
-        closeModal()
-        await fetchMembers()
-        return
-      }
-
-      // CREATE NEW USER
-      // Save current session before anything
-      const { data: { session: currentSession } } = await supabase.auth.getSession()
-
-      // Use fetch directly to call Supabase Auth API without touching current session
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/signup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({
-          email: data.email,
-          password: data.password,
-          data: { full_name: data.full_name, role: data.role },
-        }),
-      })
-
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.msg || result.error_description || 'Erro ao criar usuário')
-      }
-
-      const userId = result.id || result.user?.id
-      if (!userId) throw new Error('ID do usuário não retornado')
-
-      // Restore session if it was changed
-      if (currentSession) {
-        await supabase.auth.setSession({
-          access_token: currentSession.access_token,
-          refresh_token: currentSession.refresh_token,
-        })
-      }
-
-      // Insert/update profile
-      await supabase.from('profiles').upsert({
-        id: userId,
+    if (editUser) {
+      // UPDATE existing user
+      const { error } = await supabase.from('profiles').update({
         full_name: data.full_name,
-        email: data.email,
         role: data.role,
         team_id: data.team_id || null,
-        is_active: true,
-      }, { onConflict: 'id' })
-
-      toast.success(`Usuário ${data.full_name} criado com sucesso!`)
+      }).eq('id', editUser.id)
+      if (error) throw new Error(error.message)
+      toast.success('Usuário atualizado!')
       closeModal()
-      setTimeout(() => fetchMembers(), 800)
-
-    } catch (err) {
-      console.error('Save user error:', err)
-      toast.error(err.message || 'Erro ao salvar usuário')
-      // Close modal anyway and refresh
-      closeModal()
-      setTimeout(() => fetchMembers(), 800)
+      await fetchMembers()
+      return
     }
+
+    // CREATE new user - without touching admin session
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+    const userId = await createUserWithoutSessionChange(
+      data.email,
+      data.password,
+      { full_name: data.full_name, role: data.role },
+      supabaseUrl,
+      anonKey
+    )
+
+    // Insert profile
+    const { error: profileError } = await supabase.from('profiles').upsert({
+      id: userId,
+      full_name: data.full_name,
+      email: data.email,
+      role: data.role,
+      team_id: data.team_id || null,
+      is_active: true,
+    }, { onConflict: 'id' })
+
+    if (profileError) {
+      console.warn('Profile upsert warning:', profileError.message)
+      // Non-fatal - user was created in auth
+    }
+
+    toast.success(`${data.full_name} criado com sucesso!`)
+    closeModal()
+    setTimeout(() => fetchMembers(), 600)
   }
 
   const handleToggleActive = async (user) => {
@@ -184,7 +159,7 @@ export default function UsersPage() {
       await supabase.from('profiles').update({ is_active: !user.is_active }).eq('id', user.id)
       await fetchMembers()
       toast.success(user.is_active ? 'Usuário desativado' : 'Usuário ativado')
-    } catch { toast.error('Erro') }
+    } catch { toast.error('Erro ao atualizar status') }
   }
 
   return (
@@ -197,7 +172,7 @@ export default function UsersPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-500">{filtered.length} usuários</span>
-          <button onClick={loadData} className="btn-ghost text-xs h-8 px-2" title="Recarregar">
+          <button onClick={loadData} className="btn-ghost text-xs h-8 w-8 px-0 justify-center" title="Recarregar">
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
@@ -244,7 +219,7 @@ export default function UsersPage() {
                       <span className="text-slate-200 font-medium">{user.full_name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-slate-400 font-mono">{user.email}</td>
+                  <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">{user.email}</td>
                   <td className="px-4 py-3">
                     <span className="badge" style={{ color: role?.color, background: `${role?.color}15` }}>
                       <Shield size={9} className="mr-1" />{role?.label}
