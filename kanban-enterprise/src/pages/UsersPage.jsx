@@ -12,6 +12,7 @@ import toast from 'react-hot-toast'
 
 function UserForm({ user, onSave, onClose }) {
   const { teams } = useTeamsStore()
+  const [saving, setSaving] = useState(false)
   const { register, handleSubmit, control } = useForm({
     defaultValues: user ? {
       full_name: user.full_name,
@@ -26,8 +27,14 @@ function UserForm({ user, onSave, onClose }) {
     ...teams.map(t => ({ value: t.id, label: t.name, dot: t.color }))
   ]
 
+  const handleSave = async (data) => {
+    setSaving(true)
+    await onSave(data)
+    setSaving(false)
+  }
+
   return (
-    <form onSubmit={handleSubmit(onSave)} className="p-5 space-y-4">
+    <form onSubmit={handleSubmit(handleSave)} className="p-5 space-y-4">
       <div>
         <label className="label">Nome Completo *</label>
         <input {...register('full_name', { required: true })} className="input-field" placeholder="Nome do usuário" />
@@ -47,33 +54,24 @@ function UserForm({ user, onSave, onClose }) {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="label">Perfil de Acesso</label>
-          <Controller
-            name="role"
-            control={control}
-            render={({ field }) => (
-              <Select value={field.value} onChange={field.onChange} options={roleOptions} />
-            )}
-          />
+          <Controller name="role" control={control}
+            render={({ field }) => <Select value={field.value} onChange={field.onChange} options={roleOptions} />} />
         </div>
         <div>
           <label className="label">Equipe</label>
-          <Controller
-            name="team_id"
-            control={control}
-            render={({ field }) => (
-              <Select value={field.value} onChange={field.onChange} options={teamOptions} placeholder="Sem equipe" />
-            )}
-          />
+          <Controller name="team_id" control={control}
+            render={({ field }) => <Select value={field.value} onChange={field.onChange} options={teamOptions} placeholder="Sem equipe" />} />
         </div>
       </div>
-      {!user && (
-        <div className="p-3 rounded-lg text-xs text-slate-400" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
-          💡 O usuário receberá um email de confirmação. Após confirmar, poderá acessar o sistema.
-        </div>
-      )}
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={onClose} className="btn-ghost">Cancelar</button>
-        <button type="submit" className="btn-primary">Salvar</button>
+        <button type="submit" disabled={saving} className="btn-primary">
+          {saving ? (
+            <motion.div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+              animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
+          ) : null}
+          {saving ? 'Salvando...' : 'Salvar'}
+        </button>
       </div>
     </form>
   )
@@ -91,6 +89,11 @@ export default function UsersPage() {
     m.email?.toLowerCase().includes(search.toLowerCase())
   )
 
+  const closeModal = () => {
+    setShowModal(false)
+    setEditUser(null)
+  }
+
   const handleSave = async (data) => {
     try {
       if (editUser) {
@@ -101,30 +104,51 @@ export default function UsersPage() {
         }).eq('id', editUser.id)
         if (error) throw error
         toast.success('Usuário atualizado!')
+        closeModal()
+        await fetchMembers()
       } else {
+        // Step 1: create auth user
         const { data: authData, error: signUpError } = await supabase.auth.signUp({
           email: data.email,
           password: data.password,
           options: { data: { full_name: data.full_name, role: data.role } },
         })
-        if (signUpError) throw signUpError
-        if (!authData.user) throw new Error('Erro ao criar usuário')
 
+        if (signUpError) throw signUpError
+
+        const userId = authData?.user?.id
+        if (!userId) throw new Error('Não foi possível criar o usuário')
+
+        // Step 2: upsert profile immediately
         await supabase.from('profiles').upsert({
-          id: authData.user.id,
+          id: userId,
           full_name: data.full_name,
           email: data.email,
           role: data.role,
           team_id: data.team_id || null,
           is_active: true,
-        })
-        toast.success('Usuário criado! Email de confirmação enviado.')
+        }, { onConflict: 'id' })
+
+        // Step 3: close modal first, then refresh
+        toast.success(`Usuário ${data.full_name} criado!`)
+        closeModal()
+
+        // Refresh after a short delay
+        setTimeout(async () => {
+          await fetchMembers()
+        }, 500)
       }
-      await fetchMembers()
-      setShowModal(false)
-      setEditUser(null)
     } catch (err) {
-      toast.error(err.message || 'Erro ao salvar usuário')
+      console.error(err)
+      // Even on partial error, if user was created close the modal
+      if (err.message?.includes('already registered')) {
+        toast.error('Este email já está cadastrado')
+      } else {
+        toast.error(err.message || 'Erro ao salvar usuário')
+        // Close modal anyway if it looks like it was created
+        closeModal()
+        setTimeout(() => fetchMembers(), 500)
+      }
     }
   }
 
@@ -141,7 +165,8 @@ export default function UsersPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="relative flex-1 max-w-xs">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar usuários..." className="input-field pl-9 h-8 text-xs" />
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar usuários..." className="input-field pl-9 h-8 text-xs" />
         </div>
         <span className="text-xs text-slate-500">{filtered.length} usuários</span>
         {can('canCreateUsers') && (
@@ -224,8 +249,8 @@ export default function UsersPage() {
 
       <AnimatePresence>
         {showModal && (
-          <Modal title={editUser ? 'Editar Usuário' : 'Novo Usuário'} onClose={() => { setShowModal(false); setEditUser(null) }}>
-            <UserForm user={editUser} onSave={handleSave} onClose={() => { setShowModal(false); setEditUser(null) }} />
+          <Modal title={editUser ? 'Editar Usuário' : 'Novo Usuário'} onClose={closeModal}>
+            <UserForm user={editUser} onSave={handleSave} onClose={closeModal} />
           </Modal>
         )}
       </AnimatePresence>
