@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import {
-  DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
-  closestCorners, pointerWithin
+  DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors,
+  pointerWithin, rectIntersection
 } from '@dnd-kit/core'
 import { AnimatePresence } from 'framer-motion'
 import { Filter, RefreshCw } from 'lucide-react'
@@ -20,44 +20,76 @@ export default function KanbanPage() {
   const [showNewTaskModal, setShowNewTaskModal] = useState(false)
   const [defaultStatus, setDefaultStatus] = useState('backlog')
   const [showFilters, setShowFilters] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
 
   const { getTasksByStatus, moveTask, fetchTasks, filters, setFilter, resetFilters } = useTasksStore()
   const { teams, members } = useTeamsStore()
   const { can } = useAuthStore()
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-  )
+  // Use MouseSensor and TouchSensor separately for better control
+  const mouseSensor = useSensor(MouseSensor, {
+    activationConstraint: {
+      distance: 5, // 5px movement required to start drag
+    },
+  })
+  const touchSensor = useSensor(TouchSensor, {
+    activationConstraint: {
+      delay: 250,
+      tolerance: 5,
+    },
+  })
+  const sensors = useSensors(mouseSensor, touchSensor)
+
+  const getAllTasks = useCallback(() => {
+    return COLUMNS.flatMap(col => 
+      getTasksByStatus(col.id).map(t => ({ ...t, _col: col.id }))
+    )
+  }, [getTasksByStatus])
 
   const handleDragStart = useCallback(({ active }) => {
-    const allTasks = COLUMNS.flatMap(col => getTasksByStatus(col.id))
-    setActiveTask(allTasks.find(t => t.id === active.id))
-  }, [getTasksByStatus])
+    const allTasks = getAllTasks()
+    const task = allTasks.find(t => t.id === active.id)
+    if (task) {
+      setActiveTask(task)
+      setIsDragging(true)
+    }
+  }, [getAllTasks])
 
   const handleDragEnd = useCallback(async ({ active, over }) => {
     setActiveTask(null)
+    setIsDragging(false)
+
     if (!over) return
 
-    // over.id is either a column id or a task id
-    let targetStatus = COLUMNS.find(c => c.id === over.id)?.id
+    const overId = over.id
+    const allTasks = getAllTasks()
+
+    // Check if dropped on a column directly
+    let targetStatus = COLUMNS.find(c => c.id === overId)?.id
+
+    // If dropped on a task, find that task's column
     if (!targetStatus) {
-      // dropped on a task — find its column
-      const allTasks = COLUMNS.flatMap(col => getTasksByStatus(col.id).map(t => ({ ...t, _col: col.id })))
-      const overTask = allTasks.find(t => t.id === over.id)
+      const overTask = allTasks.find(t => t.id === overId)
       targetStatus = overTask?._col
     }
 
     if (!targetStatus) return
 
-    const sourceTask = COLUMNS.flatMap(col => getTasksByStatus(col.id)).find(t => t.id === active.id)
-    if (!sourceTask || sourceTask.status === targetStatus) return
+    const sourceTask = allTasks.find(t => t.id === active.id)
+    if (!sourceTask || sourceTask._col === targetStatus) return
 
     try {
       await moveTask(active.id, targetStatus)
+      toast.success(`Movido para ${COLUMNS.find(c => c.id === targetStatus)?.label}`)
     } catch {
       toast.error('Erro ao mover tarefa')
     }
-  }, [getTasksByStatus, moveTask])
+  }, [getAllTasks, moveTask])
+
+  const handleDragCancel = useCallback(() => {
+    setActiveTask(null)
+    setIsDragging(false)
+  }, [])
 
   const handleAddTask = (status) => {
     setDefaultStatus(status)
@@ -135,27 +167,35 @@ export default function KanbanPage() {
           collisionDetection={pointerWithin}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
         >
-          <div className="flex gap-3 h-full pb-4" style={{ width: 'max-content' }}>
+          <div className="flex gap-3 h-full pb-4" style={{ width: 'max-content', minWidth: '100%' }}>
             {COLUMNS.map(column => (
               <KanbanColumn
                 key={column.id}
                 column={column}
                 tasks={getTasksByStatus(column.id)}
-                onTaskClick={setSelectedTask}
+                onTaskClick={(task) => !isDragging && setSelectedTask(task)}
                 onAddTask={can('canCreateTasks') ? handleAddTask : undefined}
                 canCreate={can('canCreateTasks')}
               />
             ))}
           </div>
 
-          <DragOverlay>
-            {activeTask && <TaskCard task={activeTask} />}
+          <DragOverlay dropAnimation={{
+            duration: 150,
+            easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
+          }}>
+            {activeTask ? (
+              <div style={{ opacity: 0.9, transform: 'rotate(2deg)', cursor: 'grabbing' }}>
+                <TaskCard task={activeTask} />
+              </div>
+            ) : null}
           </DragOverlay>
         </DndContext>
       </div>
 
-      {/* Task detail modal */}
+      {/* Modals */}
       <AnimatePresence>
         {selectedTask && (
           <TaskModal task={selectedTask} onClose={() => setSelectedTask(null)} />
