@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Edit2, Search, Shield, UserCheck, UserX } from 'lucide-react'
+import { Plus, Edit2, Search, Shield, UserCheck, UserX, RefreshCw } from 'lucide-react'
 import { useForm, Controller } from 'react-hook-form'
 import { useTeamsStore } from '../store/teamsStore'
 import { useAuthStore } from '../store/authStore'
 import { ROLES } from '../lib/constants'
 import { supabase } from '../lib/supabase'
-import { adminAuthClient } from '../lib/adminClient'
 import Modal from '../components/shared/Modal'
 import Select from '../components/shared/Select'
 import toast from 'react-hot-toast'
@@ -67,10 +66,10 @@ function UserForm({ user, onSave, onClose }) {
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={onClose} className="btn-ghost">Cancelar</button>
         <button type="submit" disabled={saving} className="btn-primary">
-          {saving ? (
-            <motion.div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+          {saving && (
+            <motion.div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full"
               animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
-          ) : null}
+          )}
           {saving ? 'Salvando...' : 'Salvar'}
         </button>
       </div>
@@ -82,13 +81,19 @@ export default function UsersPage() {
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editUser, setEditUser] = useState(null)
+  const [loading, setLoading] = useState(false)
   const { members, fetchMembers, teams, fetchTeams } = useTeamsStore()
+  const { can } = useAuthStore()
 
   useEffect(() => {
-    fetchMembers()
-    fetchTeams()
+    loadData()
   }, [])
-  const { can } = useAuthStore()
+
+  const loadData = async () => {
+    setLoading(true)
+    await Promise.all([fetchMembers(), fetchTeams()])
+    setLoading(false)
+  }
 
   const filtered = members.filter(m =>
     m.full_name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -103,6 +108,7 @@ export default function UsersPage() {
   const handleSave = async (data) => {
     try {
       if (editUser) {
+        // Update profile only
         const { error } = await supabase.from('profiles').update({
           full_name: data.full_name,
           role: data.role,
@@ -112,49 +118,64 @@ export default function UsersPage() {
         toast.success('Usuário atualizado!')
         closeModal()
         await fetchMembers()
-      } else {
-        // Step 1: create auth user
-        const { data: authData, error: signUpError } = await adminAuthClient.auth.signUp({
+        return
+      }
+
+      // CREATE NEW USER
+      // Save current session before anything
+      const { data: { session: currentSession } } = await supabase.auth.getSession()
+
+      // Use fetch directly to call Supabase Auth API without touching current session
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/auth/v1/signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
           email: data.email,
           password: data.password,
-          options: { data: { full_name: data.full_name, role: data.role } },
+          data: { full_name: data.full_name, role: data.role },
+        }),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.msg || result.error_description || 'Erro ao criar usuário')
+      }
+
+      const userId = result.id || result.user?.id
+      if (!userId) throw new Error('ID do usuário não retornado')
+
+      // Restore session if it was changed
+      if (currentSession) {
+        await supabase.auth.setSession({
+          access_token: currentSession.access_token,
+          refresh_token: currentSession.refresh_token,
         })
-
-        if (signUpError) throw signUpError
-
-        const userId = authData?.user?.id
-        if (!userId) throw new Error('Não foi possível criar o usuário')
-
-        // Step 2: upsert profile immediately
-        await supabase.from('profiles').upsert({
-          id: userId,
-          full_name: data.full_name,
-          email: data.email,
-          role: data.role,
-          team_id: data.team_id || null,
-          is_active: true,
-        }, { onConflict: 'id' })
-
-        // Step 3: close modal first, then refresh
-        toast.success(`Usuário ${data.full_name} criado!`)
-        closeModal()
-
-        // Refresh after a short delay
-        setTimeout(async () => {
-          await fetchMembers()
-        }, 500)
       }
+
+      // Insert/update profile
+      await supabase.from('profiles').upsert({
+        id: userId,
+        full_name: data.full_name,
+        email: data.email,
+        role: data.role,
+        team_id: data.team_id || null,
+        is_active: true,
+      }, { onConflict: 'id' })
+
+      toast.success(`Usuário ${data.full_name} criado com sucesso!`)
+      closeModal()
+      setTimeout(() => fetchMembers(), 800)
+
     } catch (err) {
-      console.error(err)
-      // Even on partial error, if user was created close the modal
-      if (err.message?.includes('already registered')) {
-        toast.error('Este email já está cadastrado')
-      } else {
-        toast.error(err.message || 'Erro ao salvar usuário')
-        // Close modal anyway if it looks like it was created
-        closeModal()
-        setTimeout(() => fetchMembers(), 500)
-      }
+      console.error('Save user error:', err)
+      toast.error(err.message || 'Erro ao salvar usuário')
+      // Close modal anyway and refresh
+      closeModal()
+      setTimeout(() => fetchMembers(), 800)
     }
   }
 
@@ -174,7 +195,12 @@ export default function UsersPage() {
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Buscar usuários..." className="input-field pl-9 h-8 text-xs" />
         </div>
-        <span className="text-xs text-slate-500">{filtered.length} usuários</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">{filtered.length} usuários</span>
+          <button onClick={loadData} className="btn-ghost text-xs h-8 px-2" title="Recarregar">
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
         {can('canCreateUsers') && (
           <button onClick={() => { setEditUser(null); setShowModal(true) }} className="btn-primary text-xs">
             <Plus size={14} /> Novo Usuário
@@ -192,15 +218,23 @@ export default function UsersPage() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && (
+            {loading && (
+              <tr><td colSpan={6} className="text-center py-10 text-slate-600">
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                  Carregando...
+                </div>
+              </td></tr>
+            )}
+            {!loading && filtered.length === 0 && (
               <tr><td colSpan={6} className="text-center py-10 text-slate-600">Nenhum usuário encontrado</td></tr>
             )}
-            {filtered.map((user, i) => {
+            {!loading && filtered.map((user, i) => {
               const role = ROLES.find(r => r.id === user.role)
               const team = teams.find(t => t.id === user.team_id)
               return (
                 <motion.tr key={user.id} className="border-b border-white/4 hover:bg-white/3 transition-colors"
-                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}>
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
