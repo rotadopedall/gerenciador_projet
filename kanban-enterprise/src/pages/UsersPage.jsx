@@ -1,58 +1,76 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Edit2, Search, Shield, UserCheck, UserX } from 'lucide-react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { useTeamsStore } from '../store/teamsStore'
 import { useAuthStore } from '../store/authStore'
 import { ROLES } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import Modal from '../components/shared/Modal'
+import Select from '../components/shared/Select'
 import toast from 'react-hot-toast'
 
 function UserForm({ user, onSave, onClose }) {
   const { teams } = useTeamsStore()
-  const { register, handleSubmit } = useForm({ defaultValues: user || { role: 'tecnico' } })
+  const { register, handleSubmit, control } = useForm({
+    defaultValues: user ? {
+      full_name: user.full_name,
+      role: user.role || 'tecnico',
+      team_id: user.team_id || '',
+    } : { role: 'tecnico', team_id: '' }
+  })
+
+  const roleOptions = ROLES.map(r => ({ value: r.id, label: r.label, dot: r.color }))
+  const teamOptions = [
+    { value: '', label: 'Sem equipe' },
+    ...teams.map(t => ({ value: t.id, label: t.name, dot: t.color }))
+  ]
 
   return (
     <form onSubmit={handleSubmit(onSave)} className="p-5 space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2">
-          <label className="label">Nome Completo *</label>
-          <input {...register('full_name', { required: true })} className="input-field" />
+      <div>
+        <label className="label">Nome Completo *</label>
+        <input {...register('full_name', { required: true })} className="input-field" placeholder="Nome do usuário" />
+      </div>
+      {!user && (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Email *</label>
+            <input type="email" {...register('email', { required: true })} className="input-field" placeholder="email@empresa.com" />
+          </div>
+          <div>
+            <label className="label">Senha inicial *</label>
+            <input type="password" {...register('password', { required: !user, minLength: 6 })} className="input-field" placeholder="Mínimo 6 caracteres" />
+          </div>
         </div>
-        {!user && (
-          <>
-            <div>
-              <label className="label">Email *</label>
-              <input type="email" {...register('email', { required: true })} className="input-field" />
-            </div>
-            <div>
-              <label className="label">Senha inicial *</label>
-              <input type="password" {...register('password', { required: !user, minLength: 6 })} className="input-field" placeholder="Mínimo 6 caracteres" />
-            </div>
-          </>
-        )}
+      )}
+      <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="label">Perfil</label>
-          <select {...register('role')} className="input-field">
-            {ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
+          <label className="label">Perfil de Acesso</label>
+          <Controller
+            name="role"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onChange={field.onChange} options={roleOptions} />
+            )}
+          />
         </div>
         <div>
           <label className="label">Equipe</label>
-          <select {...register('team_id')} className="input-field">
-            <option value="">Sem equipe</option>
-            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <Controller
+            name="team_id"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onChange={field.onChange} options={teamOptions} placeholder="Sem equipe" />
+            )}
+          />
         </div>
       </div>
-
       {!user && (
         <div className="p-3 rounded-lg text-xs text-slate-400" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
           💡 O usuário receberá um email de confirmação. Após confirmar, poderá acessar o sistema.
         </div>
       )}
-
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="btn-ghost">Cancelar</button>
         <button type="submit" className="btn-primary">Salvar</button>
@@ -76,7 +94,6 @@ export default function UsersPage() {
   const handleSave = async (data) => {
     try {
       if (editUser) {
-        // Update existing profile
         const { error } = await supabase.from('profiles').update({
           full_name: data.full_name,
           role: data.role,
@@ -84,28 +101,16 @@ export default function UsersPage() {
         }).eq('id', editUser.id)
         if (error) throw error
         toast.success('Usuário atualizado!')
-        await fetchMembers()
-        setShowModal(false)
-        setEditUser(null)
       } else {
-        // Create new user via Supabase Auth signUp
-        // This works with anon key — sends confirmation email
         const { data: authData, error: signUpError } = await supabase.auth.signUp({
           email: data.email,
           password: data.password,
-          options: {
-            data: {
-              full_name: data.full_name,
-              role: data.role,
-            },
-          },
+          options: { data: { full_name: data.full_name, role: data.role } },
         })
-
         if (signUpError) throw signUpError
         if (!authData.user) throw new Error('Erro ao criar usuário')
 
-        // Insert/update profile directly
-        const { error: profileError } = await supabase.from('profiles').upsert({
+        await supabase.from('profiles').upsert({
           id: authData.user.id,
           full_name: data.full_name,
           email: data.email,
@@ -113,18 +118,12 @@ export default function UsersPage() {
           team_id: data.team_id || null,
           is_active: true,
         })
-
-        if (profileError) {
-          console.error('Profile error:', profileError)
-          // Non-fatal — profile might be created by trigger
-        }
-
         toast.success('Usuário criado! Email de confirmação enviado.')
-        await fetchMembers()
-        setShowModal(false)
       }
+      await fetchMembers()
+      setShowModal(false)
+      setEditUser(null)
     } catch (err) {
-      console.error(err)
       toast.error(err.message || 'Erro ao salvar usuário')
     }
   }
@@ -142,12 +141,7 @@ export default function UsersPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="relative flex-1 max-w-xs">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar usuários..."
-            className="input-field pl-9 h-8 text-xs"
-          />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar usuários..." className="input-field pl-9 h-8 text-xs" />
         </div>
         <span className="text-xs text-slate-500">{filtered.length} usuários</span>
         {can('canCreateUsers') && (
@@ -174,13 +168,8 @@ export default function UsersPage() {
               const role = ROLES.find(r => r.id === user.role)
               const team = teams.find(t => t.id === user.team_id)
               return (
-                <motion.tr
-                  key={user.id}
-                  className="border-b border-white/4 hover:bg-white/3 transition-colors"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: i * 0.02 }}
-                >
+                <motion.tr key={user.id} className="border-b border-white/4 hover:bg-white/3 transition-colors"
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"

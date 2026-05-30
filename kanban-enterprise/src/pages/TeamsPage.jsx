@@ -1,19 +1,33 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Edit2, Trash2, Users, Shield } from 'lucide-react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { useTeamsStore } from '../store/teamsStore'
 import { useAuthStore } from '../store/authStore'
 import Modal from '../components/shared/Modal'
+import Select from '../components/shared/Select'
 import toast from 'react-hot-toast'
 
 const TEAM_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#ec4899','#06b6d4','#f97316']
 
 function TeamForm({ team, onSave, onClose }) {
   const { members } = useTeamsStore()
-  const { register, handleSubmit } = useForm({
-    defaultValues: team || { color: '#3b82f6' }
+  const { register, handleSubmit, control, watch } = useForm({
+    defaultValues: team ? {
+      name: team.name,
+      description: team.description,
+      color: team.color || '#3b82f6',
+      manager_id: team.manager_id || '',
+      supervisor_id: team.supervisor_id || '',
+    } : { color: '#3b82f6', manager_id: '', supervisor_id: '' }
   })
+
+  const selectedColor = watch('color')
+
+  const memberOptions = [
+    { value: '', label: 'Nenhum (opcional)' },
+    ...members.map(m => ({ value: m.id, label: m.full_name, sub: m.role }))
+  ]
 
   return (
     <form onSubmit={handleSubmit(onSave)} className="p-5 space-y-4">
@@ -23,34 +37,61 @@ function TeamForm({ team, onSave, onClose }) {
       </div>
       <div>
         <label className="label">Descrição</label>
-        <textarea {...register('description')} rows={2} className="input-field resize-none" />
+        <textarea {...register('description')} rows={2} className="input-field resize-none" placeholder="Descrição da equipe..." />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="label">Gestor</label>
-          <select {...register('manager_id')} className="input-field">
-            <option value="">Selecionar...</option>
-            {members.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
-          </select>
+          <label className="label">Gestor <span className="text-slate-600 normal-case font-normal">(opcional)</span></label>
+          <Controller
+            name="manager_id"
+            control={control}
+            render={({ field }) => (
+              <Select
+                value={field.value}
+                onChange={field.onChange}
+                options={memberOptions}
+                placeholder="Selecionar gestor..."
+              />
+            )}
+          />
         </div>
         <div>
-          <label className="label">Supervisor</label>
-          <select {...register('supervisor_id')} className="input-field">
-            <option value="">Selecionar...</option>
-            {members.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
-          </select>
+          <label className="label">Supervisor <span className="text-slate-600 normal-case font-normal">(opcional)</span></label>
+          <Controller
+            name="supervisor_id"
+            control={control}
+            render={({ field }) => (
+              <Select
+                value={field.value}
+                onChange={field.onChange}
+                options={memberOptions}
+                placeholder="Selecionar supervisor..."
+              />
+            )}
+          />
         </div>
       </div>
       <div>
-        <label className="label">Cor</label>
-        <div className="flex gap-2 flex-wrap mt-1">
+        <label className="label">Cor da Equipe</label>
+        <div className="flex gap-2 flex-wrap mt-2">
           {TEAM_COLORS.map(color => (
             <label key={color} className="cursor-pointer">
               <input type="radio" {...register('color')} value={color} className="sr-only" />
-              <div className="w-6 h-6 rounded-lg border-2 transition-all"
-                style={{ background: color, borderColor: 'transparent' }}
-                onClick={() => {}}
-              />
+              <div
+                className="w-8 h-8 rounded-lg transition-all flex items-center justify-center"
+                style={{
+                  background: color,
+                  border: selectedColor === color ? '2px solid white' : '2px solid transparent',
+                  boxShadow: selectedColor === color ? `0 0 12px ${color}80` : 'none',
+                  transform: selectedColor === color ? 'scale(1.1)' : 'scale(1)',
+                }}
+              >
+                {selectedColor === color && (
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="white">
+                    <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </div>
             </label>
           ))}
         </div>
@@ -71,11 +112,18 @@ export default function TeamsPage() {
 
   const handleSave = async (data) => {
     try {
+      const payload = {
+        name: data.name,
+        description: data.description,
+        color: data.color,
+        manager_id: data.manager_id || null,
+        supervisor_id: data.supervisor_id || null,
+      }
       if (editTeam) {
-        await updateTeam(editTeam.id, data)
+        await updateTeam(editTeam.id, payload)
         toast.success('Equipe atualizada!')
       } else {
-        await createTeam(data)
+        await createTeam(payload)
         toast.success('Equipe criada!')
       }
       setShowModal(false)
@@ -106,6 +154,14 @@ export default function TeamsPage() {
         )}
       </div>
 
+      {teams.length === 0 && (
+        <div className="card text-center py-16">
+          <Users size={40} className="mx-auto mb-3 opacity-20 text-blue-400" />
+          <p className="text-sm text-slate-500 mb-1">Nenhuma equipe cadastrada</p>
+          <p className="text-xs text-slate-600">Crie a primeira equipe para começar. Gestor e Supervisor são opcionais.</p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {teams.map((team, i) => {
           const tm = getTeamMembers(team.id)
@@ -135,12 +191,17 @@ export default function TeamsPage() {
                 )}
               </div>
 
-              <div className="space-y-2 text-xs">
-                {team.manager && (
+              <div className="space-y-1.5 text-xs mb-3">
+                {team.manager ? (
                   <div className="flex items-center gap-2">
                     <Shield size={11} className="text-blue-400" />
                     <span className="text-slate-500">Gestor:</span>
                     <span className="text-slate-300">{team.manager.full_name}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <Shield size={11} />
+                    <span>Sem gestor definido</span>
                   </div>
                 )}
                 {team.supervisor && (
@@ -152,45 +213,40 @@ export default function TeamsPage() {
                 )}
               </div>
 
-              <div className="mt-3 pt-3 border-t border-white/5">
+              <div className="pt-2 border-t border-white/5">
                 <div className="flex items-center gap-1.5 mb-2">
                   <Users size={11} className="text-slate-500" />
                   <span className="text-[10px] text-slate-500">{tm.length} membros</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {tm.slice(0, 6).map(m => (
+                  {tm.slice(0, 8).map(m => (
                     <div
                       key={m.id}
                       className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white"
                       style={{ background: `${team.color}30`, border: `1px solid ${team.color}40` }}
                       title={m.full_name}
                     >
-                      {m.full_name?.charAt(0)}
+                      {m.full_name?.charAt(0)?.toUpperCase()}
                     </div>
                   ))}
-                  {tm.length > 6 && (
+                  {tm.length > 8 && (
                     <div className="w-6 h-6 rounded-lg flex items-center justify-center text-[9px] text-slate-500" style={{ background: 'rgba(255,255,255,0.05)' }}>
-                      +{tm.length - 6}
+                      +{tm.length - 8}
                     </div>
                   )}
+                  {tm.length === 0 && <span className="text-[10px] text-slate-600">Nenhum membro associado</span>}
                 </div>
               </div>
             </motion.div>
           )
         })}
-
-        {teams.length === 0 && (
-          <div className="col-span-3 text-center py-12 text-slate-600">
-            <Users size={32} className="mx-auto mb-2 opacity-30" />
-            <p className="text-sm">Nenhuma equipe cadastrada</p>
-          </div>
-        )}
       </div>
 
       <AnimatePresence>
         {showModal && (
           <Modal
             title={editTeam ? 'Editar Equipe' : 'Nova Equipe'}
+            subtitle="Gestor e Supervisor são opcionais e podem ser adicionados depois"
             onClose={() => { setShowModal(false); setEditTeam(null) }}
           >
             <TeamForm team={editTeam} onSave={handleSave} onClose={() => { setShowModal(false); setEditTeam(null) }} />
