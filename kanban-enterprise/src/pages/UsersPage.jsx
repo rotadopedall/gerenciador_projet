@@ -28,7 +28,7 @@ function UserForm({ user, onSave, onClose }) {
             </div>
             <div>
               <label className="label">Senha inicial *</label>
-              <input type="password" {...register('password', { required: !user })} className="input-field" />
+              <input type="password" {...register('password', { required: !user, minLength: 6 })} className="input-field" placeholder="Mínimo 6 caracteres" />
             </div>
           </>
         )}
@@ -46,6 +46,13 @@ function UserForm({ user, onSave, onClose }) {
           </select>
         </div>
       </div>
+
+      {!user && (
+        <div className="p-3 rounded-lg text-xs text-slate-400" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
+          💡 O usuário receberá um email de confirmação. Após confirmar, poderá acessar o sistema.
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="btn-ghost">Cancelar</button>
         <button type="submit" className="btn-primary">Salvar</button>
@@ -69,7 +76,7 @@ export default function UsersPage() {
   const handleSave = async (data) => {
     try {
       if (editUser) {
-        // Update profile
+        // Update existing profile
         const { error } = await supabase.from('profiles').update({
           full_name: data.full_name,
           role: data.role,
@@ -77,25 +84,47 @@ export default function UsersPage() {
         }).eq('id', editUser.id)
         if (error) throw error
         toast.success('Usuário atualizado!')
+        await fetchMembers()
+        setShowModal(false)
+        setEditUser(null)
       } else {
-        // Create user via admin API
-        const { data: authData, error } = await supabase.auth.admin.createUser({
+        // Create new user via Supabase Auth signUp
+        // This works with anon key — sends confirmation email
+        const { data: authData, error: signUpError } = await supabase.auth.signUp({
           email: data.email,
           password: data.password,
-          user_metadata: { full_name: data.full_name, role: data.role },
-          email_confirm: true,
+          options: {
+            data: {
+              full_name: data.full_name,
+              role: data.role,
+            },
+          },
         })
-        if (error) throw error
-        // Update profile team
-        if (data.team_id) {
-          await supabase.from('profiles').update({ team_id: data.team_id }).eq('id', authData.user.id)
+
+        if (signUpError) throw signUpError
+        if (!authData.user) throw new Error('Erro ao criar usuário')
+
+        // Insert/update profile directly
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: authData.user.id,
+          full_name: data.full_name,
+          email: data.email,
+          role: data.role,
+          team_id: data.team_id || null,
+          is_active: true,
+        })
+
+        if (profileError) {
+          console.error('Profile error:', profileError)
+          // Non-fatal — profile might be created by trigger
         }
-        toast.success('Usuário criado!')
+
+        toast.success('Usuário criado! Email de confirmação enviado.')
+        await fetchMembers()
+        setShowModal(false)
       }
-      await fetchMembers()
-      setShowModal(false)
-      setEditUser(null)
     } catch (err) {
+      console.error(err)
       toast.error(err.message || 'Erro ao salvar usuário')
     }
   }
@@ -138,6 +167,9 @@ export default function UsersPage() {
             </tr>
           </thead>
           <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={6} className="text-center py-10 text-slate-600">Nenhum usuário encontrado</td></tr>
+            )}
             {filtered.map((user, i) => {
               const role = ROLES.find(r => r.id === user.role)
               const team = teams.find(t => t.id === user.team_id)
@@ -153,7 +185,7 @@ export default function UsersPage() {
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
                         style={{ background: role?.color ? `${role.color}25` : 'rgba(59,130,246,0.2)', border: `1px solid ${role?.color || '#3b82f6'}30` }}>
-                        {user.full_name?.charAt(0)}
+                        {user.full_name?.charAt(0)?.toUpperCase()}
                       </div>
                       <span className="text-slate-200 font-medium">{user.full_name}</span>
                     </div>
