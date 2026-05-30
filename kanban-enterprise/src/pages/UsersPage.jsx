@@ -6,6 +6,7 @@ import { useTeamsStore } from '../store/teamsStore'
 import { useAuthStore } from '../store/authStore'
 import { ROLES } from '../lib/constants'
 import { supabase } from '../lib/supabase'
+import { adminAuthClient } from '../lib/adminClient'
 import Modal from '../components/shared/Modal'
 import Select from '../components/shared/Select'
 import toast from 'react-hot-toast'
@@ -108,7 +109,7 @@ export default function UsersPage() {
         await fetchMembers()
       } else {
         // Step 1: create auth user
-        const { data: authData, error: signUpError } = await supabase.auth.signUp({
+        const { data: authData, error: signUpError } = await adminAuthClient.auth.signUp({
           email: data.email,
           password: data.password,
           options: { data: { full_name: data.full_name, role: data.role } },
