@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Edit2, Search, Shield, UserCheck, UserX } from 'lucide-react'
 import { useForm, Controller } from 'react-hook-form'
@@ -82,7 +82,12 @@ export default function UsersPage() {
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editUser, setEditUser] = useState(null)
-  const { members, fetchMembers, teams } = useTeamsStore()
+  const { members, fetchMembers, teams, fetchTeams } = useTeamsStore()
+
+  useEffect(() => {
+    fetchMembers()
+    fetchTeams()
+  }, [])
   const { can } = useAuthStore()
 
   const filtered = members.filter(m =>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Edit2, Trash2, Users, Shield } from 'lucide-react'
 import { useForm, Controller } from 'react-hook-form'
@@ -107,7 +107,12 @@ function TeamForm({ team, onSave, onClose }) {
 export default function TeamsPage() {
   const [showModal, setShowModal] = useState(false)
   const [editTeam, setEditTeam] = useState(null)
-  const { teams, members, createTeam, updateTeam, deleteTeam } = useTeamsStore()
+  const { teams, members, createTeam, updateTeam, deleteTeam, fetchTeams, fetchMembers } = useTeamsStore()
+
+  useEffect(() => {
+    fetchTeams()
+    fetchMembers()
+  }, [])
   const { can } = useAuthStore()
 
   const handleSave = async (data) => {
