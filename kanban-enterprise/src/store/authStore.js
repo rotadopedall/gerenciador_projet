@@ -27,17 +27,46 @@ export const useAuthStore = create((set, get) => ({
   },
 
   fetchProfile: async (userId) => {
+    // Try simple query first (no joins to avoid RLS issues)
     const { data, error } = await supabase
       .from('profiles')
-      .select('*, teams(*)')
+      .select('*')
       .eq('id', userId)
-      .single()
+      .maybeSingle()
+
     if (!error && data) {
+      // Try to also get team data
+      let profile = data
+      if (data.team_id) {
+        const { data: team } = await supabase
+          .from('teams')
+          .select('*')
+          .eq('id', data.team_id)
+          .maybeSingle()
+        if (team) profile = { ...data, teams: team }
+      }
       set({
-        profile: data,
-        user: data,
+        profile,
+        user: profile,
         permissions: ROLE_PERMISSIONS[data.role] || {},
       })
+    } else {
+      // Fallback to auth metadata
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const fallbackRole = user.user_metadata?.role || 'administrador'
+        const fallbackProfile = {
+          id: user.id,
+          email: user.email,
+          full_name: user.user_metadata?.full_name || user.email?.split('@')[0],
+          role: fallbackRole,
+        }
+        set({
+          profile: fallbackProfile,
+          user: fallbackProfile,
+          permissions: ROLE_PERMISSIONS[fallbackRole] || {},
+        })
+      }
     }
   },
 
@@ -66,6 +95,7 @@ export const useAuthStore = create((set, get) => ({
 
   isRole: (...roles) => {
     const { profile } = get()
-    return roles.includes(profile?.role)
+    if (!profile?.role) return false
+    return roles.includes(profile.role)
   },
 }))
